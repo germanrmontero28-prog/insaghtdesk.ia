@@ -1,12 +1,18 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app import crud, schemas
+from app.agent import service as agent_service
+from app.agent.client import get_gemini_client
 from app.database import Base, engine, get_db
 from app.seed import seed_database
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 @asynccontextmanager
@@ -56,3 +62,15 @@ def post_venta(venta: schemas.VentaCreate, db: Session = Depends(get_db)):
 @app.get("/api/indicadores", response_model=schemas.Indicadores)
 def get_indicadores(db: Session = Depends(get_db)):
     return crud.calcular_indicadores(db)
+
+
+@app.post("/api/agente/chat", response_model=schemas.AgentChatResponse)
+def post_agente_chat(
+    payload: schemas.AgentChatRequest,
+    db: Session = Depends(get_db),
+    client=Depends(get_gemini_client),
+):
+    try:
+        return agent_service.responder_chat(db=db, client=client, mensaje=payload.mensaje)
+    except agent_service.AgentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

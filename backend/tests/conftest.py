@@ -45,3 +45,13 @@ def client(monkeypatch):
 
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture()
+def db_session(client):
+    """Sesión directa sobre la misma base en memoria que usa `client`."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

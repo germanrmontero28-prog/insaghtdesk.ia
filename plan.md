@@ -69,11 +69,40 @@ Verificaciones ejecutadas:
 No se avanza a integrar Gemini (Fase 4) sin autorización.
 
 ## Fase 4 — Agente
-- [ ] Configurar Gemini.
-- [ ] Implementar herramientas de consulta.
-- [ ] Integrar function calling.
-- [ ] Crear endpoint de chat.
-- [ ] Construir interfaz conversacional.
+- [x] Configurar Gemini.
+- [x] Implementar herramientas de consulta.
+- [x] Integrar function calling.
+- [x] Crear endpoint de chat.
+- [ ] Construir interfaz conversacional. (fuera de alcance de esta instrucción; `AgentPanel` ya existe como placeholder desde la Fase 3)
+
+**Estado: implementación backend completada (2026-10-28).** El alcance pedido fue backend + function calling + pruebas; la UI conversacional del panel lateral queda pendiente de una instrucción explícita.
+
+Implementación:
+- `backend/app/agent/tools.py`: 3 herramientas de solo lectura (`consultar_resumen_ventas`, `consultar_ventas_por_producto`, `consultar_ventas_por_categoria`) que consultan SQLite vía SQLAlchemy ORM (`.filter()`/`.ilike()` parametrizados) — sin SQL arbitrario ni mutaciones. Declaraciones `FunctionDeclaration`/`Tool` del SDK `google-genai` para function calling real (no simulado en producción).
+- `backend/app/agent/client.py`: dependencia FastAPI `get_gemini_client` — construye `genai.Client` leyendo `GEMINI_API_KEY` de variables de entorno en cada request; si falta, responde 503 sin tocar la clave.
+- `backend/app/agent/service.py`: bucle manual de function calling (hasta 4 rondas) contra `client.models.generate_content`; ejecuta las herramientas reales y devuelve sus resultados a Gemini como `function_response`; prompt de sistema exige basar cifras exclusivamente en resultados de herramientas y cerrar con una recomendación. Traduce errores del SDK (`google.genai.errors`) y `TimeoutError` a códigos HTTP sin exponer nunca el detalle crudo de la excepción ni la API key: 503 (sin configurar / auth / servidor no disponible), 429 (cuota), 504 (timeout), 502 (respuesta vacía o error inesperado).
+- `backend/app/schemas.py`: `AgentChatRequest` (mensaje, 1-2000 caracteres) y `AgentChatResponse` (respuesta, herramientas usadas) con validación Pydantic.
+- `backend/app/main.py`: `POST /api/agente/chat`; carga `.env` vía `python-dotenv` (ya estaba como dependencia desde la Fase 1, sin usar hasta ahora).
+- `backend/.env.example` actualizado con `GEMINI_MODEL` (configurable, por defecto `gemini-2.5-flash`); se repuso tras desaparecer del disco (el usuario parece haberlo renombrado a `.env` al configurar su clave) — no se tocó `backend/.env`.
+
+Verificaciones ejecutadas:
+- `pytest -q` → **35/35 passed** (17 previos de Fases 1-2 + 7 de herramientas del agente contra datos reales del seed + 11 del endpoint de chat).
+- Herramientas probadas directamente contra la base sembrada real (`test_agent_tools.py`): resumen coincide con `crud.calcular_indicadores`, búsqueda por id/nombre parcial, errores controlados cuando no hay criterio o no hay coincidencias.
+- Endpoint de chat probado con un **Gemini simulado** (`test_agente.py`: clase `FakeGeminiClient`/`FakeModels` que guioniza respuestas de `generate_content`, inyectada vía `app.dependency_overrides[get_gemini_client]`) — sin costo ni dependencia de red real:
+  - invoca una herramienta y entrega una respuesta final con recomendación;
+  - encadena dos herramientas en rondas sucesivas;
+  - error de autenticación (401) → 503, verificando explícitamente que la clave/el detalle crudo del error **no** aparece en la respuesta;
+  - cuota excedida (429) → 429;
+  - error de servidor de Gemini (503) → 503;
+  - timeout → 504;
+  - respuesta vacía / sin texto ni function_call → 502;
+  - `GEMINI_API_KEY` no configurada → 503;
+  - mensaje vacío → 422 (validación Pydantic, aislada del resto de dependencias).
+- Verificación manual: se arrancó la app real sin `GEMINI_API_KEY` configurada y se confirmó que `/api/agente/chat` falla con 503 limpio, sin texto de la clave ni trazas internas.
+
+Pendiente para una futura fase (no solicitado aquí): conectar el panel lateral del frontend (`AgentPanel`) a este endpoint para una interfaz conversacional real.
+
+No se avanza a la Fase 5 sin autorización.
 
 ## Fase 5 — Calidad
 - [ ] Ejecutar pytest.

@@ -47,3 +47,12 @@ class Indicadores(BaseModel):
     cantidad_vendida: int
     ticket_promedio: float
     ventas_por_categoria: list[VentaPorCategoria]
+
+
+class AgentChatRequest(BaseModel):
+    mensaje: str = Field(min_length=1, max_length=2000)
+
+
+class AgentChatResponse(BaseModel):
+    respuesta: str
+    herramientas: list[str] = Field(default_factory=list)

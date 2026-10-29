@@ -26,4 +26,6 @@ export const api = {
   crearVenta: (venta) =>
     request('/api/ventas', { method: 'POST', body: JSON.stringify(venta) }),
   getIndicadores: () => request('/api/indicadores'),
+  chatAgente: (mensaje) =>
+    request('/api/agente/chat', { method: 'POST', body: JSON.stringify({ mensaje }) }),
 };

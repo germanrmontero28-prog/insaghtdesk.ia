@@ -73,9 +73,9 @@ No se avanza a integrar Gemini (Fase 4) sin autorización.
 - [x] Implementar herramientas de consulta.
 - [x] Integrar function calling.
 - [x] Crear endpoint de chat.
-- [ ] Construir interfaz conversacional. (fuera de alcance de esta instrucción; `AgentPanel` ya existe como placeholder desde la Fase 3)
+- [x] Construir interfaz conversacional. (conectada el 2026-10-28, a solicitud explícita; ver abajo)
 
-**Estado: implementación backend completada (2026-10-28).** El alcance pedido fue backend + function calling + pruebas; la UI conversacional del panel lateral queda pendiente de una instrucción explícita.
+**Estado: completada, incluida la UI conversacional (2026-10-28).**
 
 Implementación:
 - `backend/app/agent/tools.py`: 3 herramientas de solo lectura (`consultar_resumen_ventas`, `consultar_ventas_por_producto`, `consultar_ventas_por_categoria`) que consultan SQLite vía SQLAlchemy ORM (`.filter()`/`.ilike()` parametrizados) — sin SQL arbitrario ni mutaciones. Declaraciones `FunctionDeclaration`/`Tool` del SDK `google-genai` para function calling real (no simulado en producción).
@@ -100,7 +100,20 @@ Verificaciones ejecutadas:
   - mensaje vacío → 422 (validación Pydantic, aislada del resto de dependencias).
 - Verificación manual: se arrancó la app real sin `GEMINI_API_KEY` configurada y se confirmó que `/api/agente/chat` falla con 503 limpio, sin texto de la clave ni trazas internas.
 
-Pendiente para una futura fase (no solicitado aquí): conectar el panel lateral del frontend (`AgentPanel`) a este endpoint para una interfaz conversacional real.
+### Conexión con el frontend y verificación en vivo (2026-10-28)
+
+- `frontend/src/api.js`: `chatAgente(mensaje)` → `POST /api/agente/chat`.
+- `frontend/src/components/AgentPanel.jsx`: dejó de ser un placeholder; ahora es un chat real (historial de mensajes, estado "Pensando…", errores legibles, indica qué herramientas consultó el agente en cada respuesta).
+- `npm run build` sigue compilando sin errores tras el cambio.
+
+**Bugs encontrados y corregidos al probar con la clave real del usuario** (no se detectan con el Gemini simulado, que no ejercita la red ni la librería HTTP real):
+1. `GEMINI_MODEL` en `.env` tenía el formato `Gemini 3.8 Flash` (inválido para la API; debe ser `gemini-3.8-flash`, minúsculas con guiones). Corregido en `.env` y en la plantilla `.env.example`.
+2. El modelo por defecto del código (`gemini-2.5-flash`) ya no está disponible para esta cuenta (la API devuelve 404 y sugiere `gemini-3.8-flash`). Se actualizó `DEFAULT_MODEL` en `backend/app/agent/service.py`.
+3. **El cliente de Gemini no tenía timeout configurado**: una respuesta lenta (alta demanda del lado de Gemini) colgaba la petición indefinidamente en vez de fallar con nuestro 504. Se añadió `http_options=types.HttpOptions(timeout=30000)` (30 s) en `backend/app/agent/client.py`.
+4. Un timeout real de la librería HTTP (`httpx.TimeoutException`) no estaba cubierto por el `except` de `service.py` (solo capturaba `TimeoutError` de Python) y habría escapado como error 500 sin nuestro mensaje genérico. Corregido añadiendo `httpx.TimeoutException` al `except` y a las pruebas.
+5. Un `504` devuelto por el propio gateway de Gemini (envuelto como `errors.ServerError`) se mapeaba al 503 genérico; ahora se distingue y se mapea a nuestro 504 (es, en la práctica, un timeout). Se agregó una prueba específica.
+- `pytest -q` → **37/37 passed** tras estas correcciones.
+- Verificación en vivo con la clave real del usuario: confirmado que la clave autentica correctamente y que `gemini-3.8-flash` es un modelo válido; el servicio de Gemini está devolviendo 503/504 por alta demanda en el momento de la prueba (confirmado con un script de diagnóstico que llamó a la API directamente) — comportamiento esperado y ya manejado correctamente por nuestro código, no un bug nuestro.
 
 No se avanza a la Fase 5 sin autorización.
 

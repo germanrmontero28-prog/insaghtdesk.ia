@@ -1,6 +1,7 @@
 import logging
 import os
 
+import httpx
 from google.genai import errors, types
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,7 @@ from app.agent.tools import AGENT_TOOLS, TOOL_FUNCTIONS
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 MAX_TOOL_ROUNDS = 4
 
 SYSTEM_INSTRUCTION = (
@@ -44,8 +45,10 @@ def _mapear_error_gemini(exc: Exception) -> AgentError:
         return AgentError("No se pudo procesar la consulta con el agente.", 502)
     if isinstance(exc, errors.ServerError):
         logger.warning("Error del servidor de Gemini (code=%s).", exc.code)
+        if exc.code == 504:
+            return AgentError("El agente tardó demasiado en responder.", 504)
         return AgentError("El servicio de IA no está disponible en este momento.", 503)
-    if isinstance(exc, TimeoutError):
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
         logger.warning("Timeout al llamar a Gemini.")
         return AgentError("El agente tardó demasiado en responder.", 504)
     logger.exception("Error inesperado al llamar a Gemini.")
@@ -69,7 +72,7 @@ def responder_chat(db: Session, client, mensaje: str) -> dict:
                     tools=[AGENT_TOOLS],
                 ),
             )
-        except (errors.APIError, TimeoutError) as exc:
+        except (errors.APIError, TimeoutError, httpx.TimeoutException) as exc:
             raise _mapear_error_gemini(exc) from exc
 
         if not response or not response.candidates or not response.candidates[0].content:

@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from google.genai import errors, types
 
@@ -154,8 +155,32 @@ def test_chat_error_servidor(client):
     assert response.status_code == 503
 
 
+def test_chat_error_servidor_504_es_timeout(client):
+    # Un 504 del propio gateway de Gemini es, en la práctica, un timeout:
+    # debe mapearse a nuestro 504, no al 503 genérico.
+    fake = FakeGeminiClient(
+        [errors.ServerError(504, {"error": {"message": "gateway timeout"}})]
+    )
+    app.dependency_overrides[get_gemini_client] = lambda: fake
+
+    response = client.post("/api/agente/chat", json={"mensaje": "hola"})
+
+    assert response.status_code == 504
+
+
 def test_chat_error_timeout(client):
     fake = FakeGeminiClient([TimeoutError("timed out")])
+    app.dependency_overrides[get_gemini_client] = lambda: fake
+
+    response = client.post("/api/agente/chat", json={"mensaje": "hola"})
+
+    assert response.status_code == 504
+
+
+def test_chat_error_timeout_httpx(client):
+    # Timeout real de la librería HTTP subyacente (no sólo TimeoutError de
+    # Python): debe mapear a 504 igual que el caso genérico.
+    fake = FakeGeminiClient([httpx.ReadTimeout("timed out")])
     app.dependency_overrides[get_gemini_client] = lambda: fake
 
     response = client.post("/api/agente/chat", json={"mensaje": "hola"})

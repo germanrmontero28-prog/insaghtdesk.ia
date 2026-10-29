@@ -48,10 +48,25 @@ Verificaciones ejecutadas:
 No se avanza a la Fase 3 sin autorización.
 
 ## Fase 3 — Frontend
-- [ ] Construir dashboard.
-- [ ] Mostrar indicadores y gráficos.
-- [ ] Crear formulario de ventas.
-- [ ] Conectar frontend con backend.
+- [x] Construir dashboard.
+- [x] Mostrar indicadores y gráficos.
+- [x] Crear formulario de ventas.
+- [x] Conectar frontend con backend.
+
+**Estado: completada (2026-10-28).** Implementación:
+- `frontend/src/api.js`: cliente fetch hacia el backend (`VITE_API_BASE_URL`, por defecto `http://localhost:8000`); único punto de acceso a la API. No hay datos simulados en el frontend.
+- `frontend/src/hooks/useApiResource.js`: hook reutilizable con `data/loading/error/refetch`, usado por los tres recursos (productos, ventas, indicadores).
+- Componentes reutilizables en `frontend/src/components/`: `StatTile` (KPI con estado de carga/error), `SalesByCategoryChart` (Recharts, un solo hue de acento, sin leyenda al ser una sola serie — paleta y specs de marca tomadas de la skill `dataviz`), `RecentSalesTable` (últimas 10 ventas, columnas numéricas con `tabular-nums`), `SaleForm` (valida en el backend; muestra 404/422 como error legible), `AgentPanel` (panel lateral placeholder, sin lógica — Fase 4 pendiente).
+- `App.jsx` conecta los tres recursos, muestra un banner de error si falla la conexión con el backend, y refresca ventas + indicadores tras registrar una venta.
+- Paleta y tokens de color en `index.css`/`App.css` siguiendo la paleta validada de la skill `dataviz` (`references/palette.md`), con modo oscuro vía `prefers-color-scheme`.
+
+Verificaciones ejecutadas:
+- `npm run build` → compila sin errores (`vite build`, 600 módulos). Aviso no bloqueante de Vite sobre el tamaño del bundle (Recharts); no requiere acción en esta fase.
+- `npm run lint` (oxlint) → 1 warning no bloqueante (`react(set-state-in-effect)` en `useApiResource.js`, patrón estándar de fetch-on-mount); sin errores.
+- Smoke test manual: se levantaron ambos servidores de desarrollo (`uvicorn` en :8000, `vite` en :5173) en segundo plano; se confirmó `GET /api/health`, `/api/productos` (8), `/api/indicadores` (cifras consistentes con el seed, UTF-8 correcto) y que Vite sirve el HTML del dashboard sin errores en consola del dev server. Ambos procesos se detuvieron al finalizar.
+- **No se pudo verificar visualmente en un navegador real** (no hay herramienta de navegador disponible en este entorno): no se confirmó el renderizado final, la interacción del formulario ni el gráfico a simple vista. Recomendado: abrir `http://localhost:5173` manualmente con el backend corriendo en `:8000` antes de dar por buena la Fase 3 en términos visuales.
+
+No se avanza a integrar Gemini (Fase 4) sin autorización.
 
 ## Fase 4 — Agente
 - [ ] Configurar Gemini.

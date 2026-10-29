@@ -1,122 +1,96 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import './App.css';
+import { api } from './api';
+import { AgentPanel } from './components/AgentPanel';
+import { RecentSalesTable } from './components/RecentSalesTable';
+import { SaleForm } from './components/SaleForm';
+import { SalesByCategoryChart } from './components/SalesByCategoryChart';
+import { StatTile } from './components/StatTile';
+import { formatCurrency, formatNumber } from './format';
+import { useApiResource } from './hooks/useApiResource';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const productosResource = useApiResource(api.getProductos);
+  const ventasResource = useApiResource(api.getVentas);
+  const indicadoresResource = useApiResource(api.getIndicadores);
+
+  const productos = productosResource.data ?? [];
+  const ventas = ventasResource.data ?? [];
+  const indicadores = indicadoresResource.data;
+
+  function handleVentaCreada() {
+    ventasResource.refetch();
+    indicadoresResource.refetch();
+  }
+
+  const connectionError =
+    productosResource.error || ventasResource.error || indicadoresResource.error;
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="dashboard">
+      <header className="dashboard__header">
+        <h1>InsightDesk AI</h1>
+        <p>Panel comercial</p>
+      </header>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+      {connectionError && (
+        <div className="banner banner--error">
+          No se pudo conectar con el backend ({connectionError}). Verifica que
+          la API esté corriendo en {import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}.
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      <div className="dashboard__layout">
+        <main className="dashboard__main">
+          <section className="kpi-row">
+            <StatTile
+              label="Ingresos totales"
+              value={indicadores ? formatCurrency(indicadores.ingresos_totales) : '—'}
+              loading={indicadoresResource.loading}
+              error={indicadoresResource.error}
+            />
+            <StatTile
+              label="Unidades vendidas"
+              value={indicadores ? formatNumber(indicadores.cantidad_vendida) : '—'}
+              loading={indicadoresResource.loading}
+              error={indicadoresResource.error}
+            />
+            <StatTile
+              label="Ticket promedio"
+              value={indicadores ? formatCurrency(indicadores.ticket_promedio) : '—'}
+              loading={indicadoresResource.loading}
+              error={indicadoresResource.error}
+            />
+          </section>
+
+          <section className="dashboard__row">
+            {indicadoresResource.loading ? (
+              <div className="card chart-card">
+                <h3 className="card__title">Ventas por categoría</h3>
+                <p className="card__empty">Cargando gráfico…</p>
+              </div>
+            ) : (
+              <SalesByCategoryChart data={indicadores?.ventas_por_categoria ?? []} />
+            )}
+
+            <SaleForm productos={productos} onCreated={handleVentaCreada} />
+          </section>
+
+          <section>
+            {ventasResource.loading ? (
+              <div className="card table-card">
+                <h3 className="card__title">Ventas recientes</h3>
+                <p className="card__empty">Cargando ventas…</p>
+              </div>
+            ) : (
+              <RecentSalesTable ventas={ventas} productos={productos} />
+            )}
+          </section>
+        </main>
+
+        <AgentPanel />
+      </div>
+    </div>
+  );
 }
 
-export default App
+export default App;

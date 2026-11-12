@@ -33,18 +33,17 @@ def listar_ventas(db: Session) -> list[models.Venta]:
 
 
 def calcular_indicadores(db: Session) -> dict:
-    ingresos_totales = db.query(
-        func.coalesce(func.sum(models.Venta.cantidad * models.Venta.precio_unitario), 0.0)
-    ).scalar()
-    cantidad_vendida = db.query(
-        func.coalesce(func.sum(models.Venta.cantidad), 0)
-    ).scalar()
+    importe_venta = models.Venta.cantidad * models.Venta.precio_unitario
+    ingresos_totales, cantidad_vendida = db.query(
+        func.coalesce(func.sum(importe_venta), 0.0),
+        func.coalesce(func.sum(models.Venta.cantidad), 0),
+    ).one()
     ticket_promedio = (ingresos_totales / cantidad_vendida) if cantidad_vendida else 0.0
 
     filas = (
         db.query(
             models.Producto.categoria,
-            func.sum(models.Venta.cantidad * models.Venta.precio_unitario).label("ingresos"),
+            func.sum(importe_venta).label("ingresos"),
             func.sum(models.Venta.cantidad).label("cantidad"),
         )
         .join(models.Venta, models.Venta.producto_id == models.Producto.id)

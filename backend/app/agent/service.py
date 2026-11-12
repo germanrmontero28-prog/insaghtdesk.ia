@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 import httpx
 from google.genai import errors, types
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 MAX_TOOL_ROUNDS = 4
+MAX_REINTENTOS_TRANSITORIOS = 2
+ESPERA_REINTENTO_SEGUNDOS = 1.5
 
 SYSTEM_INSTRUCTION = (
     "Eres un analista comercial de InsightDesk AI. Respondes preguntas sobre "
@@ -55,6 +58,30 @@ def _mapear_error_gemini(exc: Exception) -> AgentError:
     return AgentError("Ocurrió un error inesperado al consultar al agente.", 502)
 
 
+def _es_error_transitorio(exc: Exception) -> bool:
+    if isinstance(exc, errors.ServerError) and exc.code in (503, 504):
+        return True
+    return isinstance(exc, (TimeoutError, httpx.TimeoutException))
+
+
+def _generar_con_reintento(client, **kwargs):
+    intentos_totales = MAX_REINTENTOS_TRANSITORIOS + 1
+    for intento in range(intentos_totales):
+        try:
+            return client.models.generate_content(**kwargs)
+        except (errors.APIError, TimeoutError, httpx.TimeoutException) as exc:
+            if _es_error_transitorio(exc) and intento < intentos_totales - 1:
+                logger.warning(
+                    "Error transitorio de Gemini (%s); reintentando (intento %s/%s).",
+                    type(exc).__name__,
+                    intento + 1,
+                    intentos_totales,
+                )
+                time.sleep(ESPERA_REINTENTO_SEGUNDOS)
+                continue
+            raise _mapear_error_gemini(exc) from exc
+
+
 def responder_chat(db: Session, client, mensaje: str) -> dict:
     model = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
     contents: list[types.Content] = [
@@ -63,17 +90,15 @@ def responder_chat(db: Session, client, mensaje: str) -> dict:
     herramientas_usadas: list[str] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    tools=[AGENT_TOOLS],
-                ),
-            )
-        except (errors.APIError, TimeoutError, httpx.TimeoutException) as exc:
-            raise _mapear_error_gemini(exc) from exc
+        response = _generar_con_reintento(
+            client,
+            model=model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_INSTRUCTION,
+                tools=[AGENT_TOOLS],
+            ),
+        )
 
         if not response or not response.candidates or not response.candidates[0].content:
             raise AgentError("El agente no devolvió una respuesta.", 502)

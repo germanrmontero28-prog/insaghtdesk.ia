@@ -115,6 +115,15 @@ Verificaciones ejecutadas:
 - `pytest -q` → **37/37 passed** tras estas correcciones.
 - Verificación en vivo con la clave real del usuario: confirmado que la clave autentica correctamente y que `gemini-3.8-flash` es un modelo válido; el servicio de Gemini está devolviendo 503/504 por alta demanda en el momento de la prueba (confirmado con un script de diagnóstico que llamó a la API directamente) — comportamiento esperado y ya manejado correctamente por nuestro código, no un bug nuestro.
 
+### Reintento ante congestión transitoria de Gemini (2026-10-29)
+
+El usuario siguió viendo el error "El servicio de IA no está disponible en este momento." al usar el chat real, incluso tras cambiar a `gemini-3.5-flash`. Se confirmó en vivo (scripts de diagnóstico directos contra la API, sin pasar por nuestro backend) que la causa es alta demanda intermitente en los servidores de Gemini: la misma petición podía fallar con 503 o 504 y, segundos después, tener éxito sin cambiar nada de nuestro lado. Antes de este fix, un único 503/504 se devolvía de inmediato como error al usuario.
+
+6. `backend/app/agent/service.py`: se añadió un reintento automático con backoff (`_generar_con_reintento`) para errores transitorios del lado de Gemini — `ServerError` 503/504 y timeouts (`TimeoutError`/`httpx.TimeoutException`) — hasta 2 reintentos (3 intentos en total) con una espera de 1.5 s entre ellos, antes de devolver el error al usuario. Errores no transitorios (401/403, 429, 400, etc.) siguen fallando de inmediato, sin reintento.
+- `backend/tests/test_agente.py`: pruebas actualizadas para reflejar los reintentos (503/504/timeout persistentes agotan los 3 intentos antes de fallar) y dos pruebas nuevas que verifican que un fallo transitorio aislado (503 o timeout) ya no se propaga como error si el reintento siguiente tiene éxito.
+- `pytest -q` → **39/39 passed**.
+- Verificación en vivo repetida varias veces contra la API real del usuario con la pregunta original ("cuanto vendimos en electronica"): en una ejecución se observó un 503 seguido de un 504 que agotaron el manejo anterior (sin reintento); tras el fix, una ejecución se resolvió con un reintento (503 → éxito) y otra tuvo éxito al primer intento — en ambos casos el usuario recibe una respuesta 200 correcta en vez del error.
+
 No se avanza a la Fase 5 sin autorización.
 
 ## Fase 5 — Calidad

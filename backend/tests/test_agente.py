@@ -144,32 +144,58 @@ def test_chat_error_cuota(client):
     assert response.status_code == 429
 
 
-def test_chat_error_servidor(client):
+def test_chat_error_servidor(client, monkeypatch):
+    # Un 503 persistente agota los reintentos automáticos y termina en error.
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
     fake = FakeGeminiClient(
-        [errors.ServerError(503, {"error": {"message": "unavailable"}})]
+        [errors.ServerError(503, {"error": {"message": "unavailable"}})] * 3
     )
     app.dependency_overrides[get_gemini_client] = lambda: fake
 
     response = client.post("/api/agente/chat", json={"mensaje": "hola"})
 
     assert response.status_code == 503
+    assert len(fake.models.llamadas) == 3
 
 
-def test_chat_error_servidor_504_es_timeout(client):
-    # Un 504 del propio gateway de Gemini es, en la práctica, un timeout:
-    # debe mapearse a nuestro 504, no al 503 genérico.
+def test_chat_reintenta_tras_503_transitorio_y_responde(client, monkeypatch):
+    # Un 503 transitorio (congestión momentánea de Gemini) no debe
+    # propagarse como error si un reintento posterior tiene éxito.
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
     fake = FakeGeminiClient(
-        [errors.ServerError(504, {"error": {"message": "gateway timeout"}})]
+        [
+            errors.ServerError(503, {"error": {"message": "unavailable"}}),
+            _respuesta_con_texto("Las ventas van bien."),
+        ]
+    )
+    app.dependency_overrides[get_gemini_client] = lambda: fake
+
+    response = client.post("/api/agente/chat", json={"mensaje": "hola"})
+
+    assert response.status_code == 200
+    assert response.json()["respuesta"] == "Las ventas van bien."
+    assert len(fake.models.llamadas) == 2
+
+
+def test_chat_error_servidor_504_es_timeout(client, monkeypatch):
+    # Un 504 del propio gateway de Gemini es, en la práctica, un timeout:
+    # debe mapearse a nuestro 504, no al 503 genérico. Es transitorio, así
+    # que también se reintenta antes de darse por vencido.
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
+    fake = FakeGeminiClient(
+        [errors.ServerError(504, {"error": {"message": "gateway timeout"}})] * 3
     )
     app.dependency_overrides[get_gemini_client] = lambda: fake
 
     response = client.post("/api/agente/chat", json={"mensaje": "hola"})
 
     assert response.status_code == 504
+    assert len(fake.models.llamadas) == 3
 
 
-def test_chat_error_timeout(client):
-    fake = FakeGeminiClient([TimeoutError("timed out")])
+def test_chat_error_timeout(client, monkeypatch):
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
+    fake = FakeGeminiClient([TimeoutError("timed out")] * 3)
     app.dependency_overrides[get_gemini_client] = lambda: fake
 
     response = client.post("/api/agente/chat", json={"mensaje": "hola"})
@@ -177,15 +203,31 @@ def test_chat_error_timeout(client):
     assert response.status_code == 504
 
 
-def test_chat_error_timeout_httpx(client):
+def test_chat_error_timeout_httpx(client, monkeypatch):
     # Timeout real de la librería HTTP subyacente (no sólo TimeoutError de
     # Python): debe mapear a 504 igual que el caso genérico.
-    fake = FakeGeminiClient([httpx.ReadTimeout("timed out")])
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
+    fake = FakeGeminiClient([httpx.ReadTimeout("timed out")] * 3)
     app.dependency_overrides[get_gemini_client] = lambda: fake
 
     response = client.post("/api/agente/chat", json={"mensaje": "hola"})
 
     assert response.status_code == 504
+
+
+def test_chat_reintenta_tras_timeout_transitorio_y_responde(client, monkeypatch):
+    # Un único timeout aislado tampoco debe propagarse si el reintento
+    # siguiente tiene éxito.
+    monkeypatch.setattr("app.agent.service.ESPERA_REINTENTO_SEGUNDOS", 0)
+    fake = FakeGeminiClient(
+        [httpx.ReadTimeout("timed out"), _respuesta_con_texto("Todo en orden.")]
+    )
+    app.dependency_overrides[get_gemini_client] = lambda: fake
+
+    response = client.post("/api/agente/chat", json={"mensaje": "hola"})
+
+    assert response.status_code == 200
+    assert response.json()["respuesta"] == "Todo en orden."
 
 
 def test_chat_respuesta_vacia(client):
